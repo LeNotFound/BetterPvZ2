@@ -42,7 +42,7 @@ pip install -r requirements.txt
 ## To Do
 ~~什么大型卫星发射仪式~~
 - [ ] 设计本项目的 logo 以及完善 README
-- [ ] 加入 log 系统，控制台输出统一保存到日志
+- [ ] 加入日志系统，控制台输出统一保存到日志
 - [ ] 创建项目主页，初步计划使用和 BetterGI 一样的 <https://theme-hope.vuejs.press/zh/>
 - [ ] 支持拖动矿车操作
 - [ ] 创建自定义策略接口，支持特殊关卡（如狂野西部矿车等）
