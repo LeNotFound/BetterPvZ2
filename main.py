@@ -1,58 +1,54 @@
 import subprocess
 import io
 from PIL import Image
-import easyocr  # 替换pytesseract
-import numpy as np  # 新增导入
-import os  # 新增导入
+import easyocr
+import numpy as np
+import os
 import time
 import math
-from screenshot import Screenshot  # 新增导入截图器模块
+from screenshot import Screenshot
 import threading
 import random
-from queue import Queue  # 新增导入队列模块
+from queue import Queue
 
-# 修改初始化EasyOCR读取器，使用英文以便较好识别数字
 reader = easyocr.Reader(['en'], gpu=False)
 
-# 新增全局截图器对象，刷新间隔200ms
+# 截图器
 screenshot_obj = Screenshot(200)
 
-# 新增种植区域参数（均为像素单位）  
+# 种植区域参数
 PLANT_AREA_TOP_LEFT = (515, 150)
-PLANT_AREA_SIZE = (1230, 820)  # (宽度, 高度)
-PLANT_AREA_GRID = (9, 5)       # (列数, 行数)
+PLANT_AREA_SIZE = (1230, 820)
+PLANT_AREA_GRID = (9, 5)
 
-# 新增记录每个格子是否有植物的二维列表，顺序为行，每行有PLANT_AREA_GRID[0]个格子
+# 记录每个格子的植物占用情况
 PLANT_OCCUPANCY = [[False for _ in range(PLANT_AREA_GRID[0])] for _ in range(PLANT_AREA_GRID[1])]
 
-# 新增全局变量保存第九列各行上一次截图
-PREV_ZOMBIE_CELLS = [None for _ in range(PLANT_AREA_GRID[1])]  # 每行一个区域图像
-ZOMBIE_DIFF_THRESHOLD = 20  # 可调整的阈值
+# 存储第九列上次截图，用于比较检测僵尸
+PREV_ZOMBIE_CELLS = [None for _ in range(PLANT_AREA_GRID[1])]
+ZOMBIE_DIFF_THRESHOLD = 20
 
-# 新增全局变量记录向日葵生产线程及统计数据，key为(行, 列)
-SUNFLOWER_THREADS = {}    # { (row, col): Thread }
-SUNFLOWER_STATS = {}      # { (row, col): total_sun_produced }
+# 记录向日葵生产线程和产出统计
+SUNFLOWER_THREADS = {}
 
-# 新增全局队列，存放僵尸风险行（1-indexed）
+# 全局队列，存放僵尸风险行（1-indexed）
 zombie_risk_queue = Queue()
 
-# 新增全局字典记录仙人掌部署失败次数，key为行号（1-indexed）
+# 全局字典记录仙人掌部署失败次数，key为行号（1-indexed）
 CACTUS_FAIL_COUNT = {}
 
-# 新增全局字典记录冰炮上次发射时间（行号：时间）
+# 全局字典记录冰炮上次发射时间（行号：时间）
 ICE_CANNON_LAST_FIRE = {}
 
-# 新增全局变量保存每个格子的初始状态（以 numpy 数组存储），结构与 PLANT_OCCUPANCY 相同
+# 全局变量保存每个格子的初始状态（以 numpy 数组存储），结构与 PLANT_OCCUPANCY 相同
 INITIAL_CELL_STATE = [[None for _ in range(PLANT_AREA_GRID[0])] for _ in range(PLANT_AREA_GRID[1])]
 CELL_DIFF_THRESHOLD = 15  # 阈值，可根据测试调整
 
 def run_adb_command(cmd: list) -> str:
-    # 更新运行adb命令，接收命令列表
     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     return result.stdout.strip()
 
 def get_current_sun_count() -> int:
-    # 使用统一截图器获取截图
     image = screenshot_obj.capture()
     # 裁剪阳光区域：[84,25,193,78]
     cropped = image.crop((84, 25, 193, 78))
@@ -66,24 +62,22 @@ def get_current_sun_count() -> int:
     return sun_count
 
 def get_grid_occupaied(row: int, col: int) -> bool:
-    # 根据行列返回格子是否有植物
     return PLANT_OCCUPANCY[row - 1][col - 1]
 
 def get_grid_info(row: int, col: int) -> dict:
-    # TODO: 根据分辨率和格子布局计算该格子区域，然后截图识别
+    # TODO: 接入 Yolo 后用于识别当前格子植物信息
     return {}
 
 def get_plant_card_cost(index: int) -> int:
-    # TODO: 根据index获取卡片对应的区域，通过识别获取费用
+    # TODO: 接入 Yolo 后用于识别植物卡片费用
     return 0
 
-def get_plant_card_cooldown(index: int) -> float:
-    # TODO: 根据index判断卡片冷却状态，可能返回剩余秒数
+def get_plant_card_cooldown(index: int) -> bool:
+    # TODO: 接入 Yolo 后用于识别植物卡片冷却状态
     return 0.0
 
 def try_plant_plant(row: int, col: int, plant_card_index: int) -> bool:
     print(f"尝试在({row}, {col})种植植物卡{plant_card_index}")
-    # 检查目标格子是否已有植物（注意行、列均为1-indexed）
     global PLANT_OCCUPANCY
     if PLANT_OCCUPANCY[row - 1][col - 1]:
         print(f"格子({row}, {col})已有植物，跳过种植")
@@ -265,22 +259,9 @@ def debug_plant_card_costs() -> None:
         print(f"  thresh识别内容: '{text_thresh}'，费用: {cost_thresh}")
 
 def sunflower_production_thread(row: int, col: int):
-    """
-    模拟向日葵每25秒生产阳光，并调用收集函数模拟收集动作
-    """
-    global SUNFLOWER_STATS
     while True:
         time.sleep(25)  # 25秒生产周期
-        base_yield = 25
-        # 模拟大额产出概率（0.2-概率产生额外50）
-        extra = 50 if random.random() < 0.2 else 0
-        total = base_yield + extra
-        # 更新统计
-        key = (row, col)
-        SUNFLOWER_STATS[key] = SUNFLOWER_STATS.get(key, 0) + total
-        print(f"向日葵({row},{col})生产{total}阳光，总计{SUNFLOWER_STATS[key]}阳光")
-        # 同时模拟产出后立即执行一次阳光收集操作
-        collect_sun_from_grid(row, col, int(PLANT_AREA_SIZE[0]/PLANT_AREA_GRID[0]/2))
+        collect_sun_from_grid(row, col, int(PLANT_AREA_SIZE[0] / PLANT_AREA_GRID[0] / 2))
 
 def start_sunflower_production(row: int, col: int):
     """
